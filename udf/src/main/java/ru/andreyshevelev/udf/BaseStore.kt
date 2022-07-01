@@ -11,7 +11,8 @@ abstract class BaseStore<State, Action, News>(
     private val sideEffects: List<BaseSideEffect<State, Action>> = listOf(),
     private val actionSources: List<BaseActionSource<State, Action>> = mutableListOf(),
     private val actionHandlers: List<BaseActionHandler<State, Action>> = listOf(),
-    private val bootstrapAction: Action? = null
+    private val bootstrapAction: Action? = null,
+    private val storeConfig: StoreConfig = StoreConfig()
 ) : StateHolder<State> {
 
     private val scope = CoroutineScope(Dispatchers.IO)
@@ -22,10 +23,11 @@ abstract class BaseStore<State, Action, News>(
         get() = currentState
 
     private val actionFlow: MutableSharedFlow<List<Action>> = MutableSharedFlow(
-        extraBufferCapacity = 1
+        extraBufferCapacity = storeConfig.actionBufferSize
     )
     private val stateFlow: MutableSharedFlow<StoreResult<State, News>> = MutableSharedFlow(
-        replay = 1
+        replay = 1,
+        extraBufferCapacity = storeConfig.stateBufferSize
     )
     private val childJobs: MutableMap<String, Job> = mutableMapOf()
     private var parentJob: Job? = null
