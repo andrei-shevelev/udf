@@ -17,8 +17,6 @@ abstract class BaseStore<State, Action, News>(
 
     private val scope = CoroutineScope(Dispatchers.IO)
 
-    private val queue: Queue<List<Action>> = LinkedList()
-
     override val state: State
         get() = currentState
 
@@ -31,6 +29,7 @@ abstract class BaseStore<State, Action, News>(
     )
     private val childJobs: MutableMap<String, Job> = mutableMapOf()
     private var parentJob: Job? = null
+    private var storeResultTmp: StoreResult<State, News> = StoreResult(currentState, listOf())
 
     fun sendActions(actions: List<Action>) {
         actionFlow.tryEmit(actions)
@@ -149,7 +148,20 @@ abstract class BaseStore<State, Action, News>(
         val newState = storeResult.state
         if (newState != currentState || storeResult.news.isNotEmpty()) {
             currentState = newState
-            stateFlow.emit(storeResult)
+            if (stateFlow.subscriptionCount.value > 0) {
+                storeResultTmp = storeResult
+                stateFlow.emit(storeResult)
+            } else {
+                val mergeNews = mutableListOf<News>().apply {
+                    addAll(storeResult.news)
+                    addAll(storeResultTmp.news)
+                }
+                storeResultTmp.copy(
+                    state = storeResult.state,
+                    news = mergeNews
+                )
+                stateFlow.emit(storeResultTmp)
+            }
         }
     }
 
