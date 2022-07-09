@@ -2,7 +2,6 @@ package ru.andreyshevelev.udf
 
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
-import java.util.*
 
 abstract class BaseStore<State, Action, News>(
     private var currentState: State,
@@ -29,6 +28,7 @@ abstract class BaseStore<State, Action, News>(
     )
     private val childJobs: MutableMap<String, Job> = mutableMapOf()
     private var parentJob: Job? = null
+    private var awaitSubscriptionJob: Job? = null
     private var storeResultTmp: StoreResult<State, News> = StoreResult(currentState, listOf())
 
     fun sendActions(actions: List<Action>) {
@@ -37,8 +37,9 @@ abstract class BaseStore<State, Action, News>(
 
     init {
         parentJob = scope.launch {
-            initActionSource()
+            awaitSubscription()
             actionFlow
+                .filter { it.isNotEmpty() }
                 .onStart { bootstrapAction?.let { emit(listOf(it)) } }
                 .collect { actions ->
                     actions.forEach { action ->
@@ -53,13 +54,18 @@ abstract class BaseStore<State, Action, News>(
     }
 
     fun subscribe(): Flow<StoreResult<State, News>> {
-        stateFlow.tryEmit(StoreResult(currentState, listOf()))
+        stateFlow.tryEmit(storeResultTmp)
         return stateFlow.asSharedFlow()
+            .map { storeResult ->
+                storeResultTmp = storeResultTmp.copy(news = listOf())
+                storeResult
+            }
     }
 
     fun dispose() {
         childJobs.values.forEach { job -> job.cancel() }
         parentJob?.cancel()
+        awaitSubscriptionJob?.cancel()
     }
 
     private fun initActionSource() {
@@ -156,7 +162,7 @@ abstract class BaseStore<State, Action, News>(
                     addAll(storeResult.news)
                     addAll(storeResultTmp.news)
                 }
-                storeResultTmp.copy(
+                storeResultTmp = storeResultTmp.copy(
                     state = storeResult.state,
                     news = mergeNews
                 )
@@ -175,6 +181,19 @@ abstract class BaseStore<State, Action, News>(
             if (t !is CancellationException) {
                 errorHandler.handle(t)
             }
+        }
+    }
+
+    private fun awaitSubscription() {
+        awaitSubscriptionJob = scope.launch {
+            actionFlow.subscriptionCount
+                .filter { it > 0 }
+                .take(1)
+                .collect { count ->
+                    if (count > 0) {
+                        initActionSource()
+                    }
+                }
         }
     }
 }
